@@ -38,9 +38,12 @@ class DataLinker:
     def compare_pairs(self):
         # Compare the pairs of records
         compare = recordlinkage.Compare()
-        compare.string('cCleaned Name', 'cCleaned Name', method='levenshtein', threshold=0.90, label='Matched_InstitutionName_levenshtein')
+        compare.string('cCleaned Name', 'cCleaned Name', method='levenshtein', threshold=0.85, label='Matched_InstitutionName_levenshtein')
         compare.string('cCleaned Name', 'cCleaned Name', method='jarowinkler', threshold=0.90, label='Matched_InstitutionName_jarowinkler')
-        compare.string('cLocation', 'cAddress Line 1', threshold=0.80, method='damerau_levenshtein', label='Matched_Addres1_Location')
+        compare.string('cCleaned Location', 'cCleaned Name', method='levenshtein', threshold=0.90, label='Matched_Location_Name')
+        compare.string('cCleaned Address Line 1', 'cCleaned Name', method='levenshtein', threshold=0.90, label='Matched_Address1_Name')
+        compare.string('cCleaned Address Line 2', 'cCleaned Name', method='levenshtein', threshold=0.90, label='Matched_Address2_Name')
+        compare.string('cLocation', 'cAddress Line 1', threshold=0.80, method='damerau_levenshtein', label='Matched_Location_Address1')
         compare.string('cAddress Line 1', 'cAddress Line 1', threshold=0.80, method='damerau_levenshtein', label='Matched_Address1')
         compare.string('cAddress Line 2', 'cAddress Line 2', threshold=0.80, method='damerau_levenshtein', label='Matched_Address2')
         compare.exact('Postcode', 'Postcode', label='Matched_Postcode')
@@ -48,38 +51,63 @@ class DataLinker:
         self.features = compare.compute(self.pairs, self.df1, self.df2)
     
     def classify(self):
-        # Combine the two institution name matches into a single feature
-        self.features['Combined_Name_Match'] = (self.features['Matched_InstitutionName_levenshtein'] + self.features['Matched_InstitutionName_jarowinkler']) / 2.0
-        
-        # Filter the features to keep only those with a non-zero Combined_Name_Match
-        self.features = self.features[self.features['Combined_Name_Match'] != 0]
-        
+        # Filter the features to keep only those which have a non-zero value 
+        # in any of the desired name matching columns
+        self.features = self.features[
+            (self.features['Matched_InstitutionName_levenshtein'] != 0) |
+            (self.features['Matched_InstitutionName_jarowinkler'] != 0) |
+            (self.features['Matched_Location_Name'] != 0) |
+            (self.features['Matched_Address1_Name'] != 0) |
+            (self.features['Matched_Address2_Name'] != 0)
+        ]
+
         # Define the weights for each feature
         WEIGHTS = {
-            'Combined_Name_Match': 2,
-            'Matched_Addres1_Location': 1,
+            'Matched_InstitutionName_levenshtein': 1,
+            'Matched_InstitutionName_jarowinkler': 1,
+            'Matched_Location_Name': 1,
+            'Matched_Address1_Name': 1,
+            'Matched_Address2_Name': 1,
+            'Matched_Location_Address1': 1,   # Notice the typo correction here
             'Matched_Address1': 1,
             'Matched_Address2': 1,
             'Matched_Postcode': 1,
-            }
-        # Customizations: Modify the WEIGHTS dictionary to change the weights of the features
-        
+        }
+
         # Compute the weighted sum of the features
-        self.features['weighted_sum'] = sum(self.features[col] * WEIGHTS[col] for col in WEIGHTS)
-        
+        self.features['weighted_sum'] = sum(self.features[col] * WEIGHTS[col] for col in WEIGHTS if col in self.features.columns)
+
         # Keep only the matches with a weighted sum above a certain threshold
         self.matches = self.features[self.features['weighted_sum'] >= 2]
-        # Customizations: Modify the threshold (2) to change the sensitivity of the matching
     
     def post_process(self):
         # Reset the index of the matches
         self.result = self.matches.reset_index()
         
+        # Dictionary to map matched columns to their corresponding cleaned columns
+        columns_map = {
+            'Matched_InstitutionName_levenshtein': 'cCleaned Name',
+            'Matched_InstitutionName_jarowinkler': 'cCleaned Name',
+            'Matched_Location_Name': 'cCleaned Location',
+            'Matched_Address1_Name': 'cCleaned Address Line 1',
+            'Matched_Address2_Name': 'cCleaned Address Line 2'
+        }
+        
         # Compute the FuzzyWuzzy score for each match
         for index, row in self.result.iterrows():
-            name1 = self.df1.loc[row['level_0'], 'cCleaned Name']
             name2 = self.df2.loc[row['level_1'], 'cCleaned Name']
-            self.result.at[index, 'fuzzy_score'] = fuzz.ratio(name1, name2)
+            
+            # Check which columns have a value of 1 and compute the fuzzy score based on them
+            scores = []
+            for col, value in row.items():
+                if col in columns_map and value == 1:
+                    name1 = self.df1.loc[row['level_0'], columns_map[col]]
+                    scores.append(fuzz.ratio(name1, name2))
+            
+            # Here, you might want to define how you'll aggregate the scores 
+            # (e.g., take the average, max, etc.) for the final 'fuzzy_score'. 
+            # I'm using max() for this example.
+            self.result.at[index, 'fuzzy_score'] = max(scores) if scores else 0
         
         # Sort the matches by FuzzyWuzzy score and keep only the best match for each record
         self.result.sort_values('fuzzy_score', ascending=False, inplace=True)

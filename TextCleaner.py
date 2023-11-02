@@ -19,9 +19,7 @@ class TextCleaner:
         text = text.lower().strip()
         text = text.replace("\n", " ").replace("\t", " ").replace("\r", " ")
         text = self.regex_cleaning(text)
-        words_list = word_tokenize(text)
-        text = self.lemmatize_words(words_list)
-        return ' '.join(text)
+        return text
 
     def regex_cleaning(self, text):
         replacements = {
@@ -31,13 +29,18 @@ class TextCleaner:
     r'\buni\b': 'university',
     r'\buniv\b': 'university',
     r'\bunis\b': 'university',
+    r'\bunivrs\b': 'university',
+    r'\bunivrsity\b': 'university',
     r'\buniversities\b': 'university',
     r'\buniversitys\b': 'university',
     r'\bassoc\b': 'association',
     r'\bsoc\b': 'society',
     r'\bft\b': 'foundation trust',
+    r'\bnhsft\b': 'nhs foundation trust',
     r'\btrst\b': 'trust',
     r'\btrs\b': 'trust',
+    r'\bnhstrst\b': 'nhs trust',
+    r'\bnhstrs\b': 'nhs trust',
     r'\&\b': 'and',
     r'\bmed\b': 'medical',
     r'\bdr\b': 'doctor',
@@ -60,11 +63,3 @@ class TextCleaner:
         text = re.sub(r'\s+', ' ', text).strip()
         return text
 
-    def lemmatize_words(self, words_list):
-        final_words = []
-        word_lemmatized = WordNetLemmatizer()
-        for word, tag in pos_tag(words_list):
-            if word not in self.stopwords and word.isalpha() and len(word) > 2:
-                word_final = word_lemmatized.lemmatize(word, self.tag_map[tag[0]])
-                final_words.append(word_final)
-        return final_words
